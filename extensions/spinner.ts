@@ -44,7 +44,13 @@ function readSpinnerSettings(): { adaptive: boolean; verbColor: string; statusCo
 	// orange as the glyph on themes like openAntigravity-dark.
 	let verbColor = "borderAccent";
 	let statusColor = "muted";
-	const paths = [`${process.cwd()}/.pi/settings.json`, `${process.env.HOME ?? ""}/.pi/settings.json`];
+	// pi 0.8x+ keeps user settings in the agent dir; read it after the legacy
+	// home path so the current location wins (project cwd wins last).
+	const paths = [
+		`${process.env.HOME ?? ""}/.pi/settings.json`,
+		`${process.env.HOME ?? ""}/.pi/agent/settings.json`,
+		`${process.cwd()}/.pi/settings.json`,
+	];
 	for (const p of paths) {
 		try {
 			if (!p || !existsSync(p)) continue;

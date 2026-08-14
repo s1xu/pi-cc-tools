@@ -146,8 +146,13 @@ function readSettings(): SettingsFile {
 	}
 	const cwdPath = `${process.cwd()}/.pi/settings.json`;
 	const homePath = `${process.env.HOME ?? ""}/.pi/settings.json`;
+	// pi 0.8x+ keeps user settings in the agent dir (`~/.pi/agent/settings.json`),
+	// which is exactly what the running pi reads. Read it after the legacy
+	// home path so the current location wins on merge. Precedence matches pi's
+	// settings manager: project (cwd) overrides user (agent), legacy last.
+	const agentPath = `${process.env.HOME ?? ""}/.pi/agent/settings.json`;
 	const merged: SettingsFile = {};
-	for (const path of [cwdPath, homePath]) {
+	for (const path of [homePath, agentPath, cwdPath]) {
 		try {
 			if (!path || !existsSync(path)) continue;
 			const raw = JSON.parse(readFileSync(path, "utf8"));
