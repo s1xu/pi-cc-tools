@@ -9,14 +9,18 @@
   "extraToolOutputExpanded": false,
   "groupToolCalls": true,
   "bashOutputMode": "opencode",
-  "bashCollapsedLines": 10,
+  "bashCollapsedLines": 24,
   "liveToolPreview": true,
   "liveToolPreviewLines": 5,
   "diffCollapsedLines": 24,
   "showTruncationHints": false,
   "themeAdaptive": true,
-  "diffTheme": "github-dark",
+  "diffTheme": "claude-code-dark",
   "diffColors": {},
+  "hideThinkingBlock": false,
   "dshStyleThinking": true,
-  "dshStyleUserMessage": true
+  "dshStyleUserMessage": true,
+  "dshStyleInputPrompt": true,
+  "dshStyleSimpleCodeBlocks": true,
+  "dshStylePlainDiff": true
 }

@@ -27,7 +27,7 @@ Claude Code inspired tool rendering for Pi — Shiki-powered diffs, status dots,
 - **Live running previews** that show a few output lines for active tool calls (latest lines for bash), persisting until the next tool/text activity
 - **Subagent completion notifications** restyled to match the same Claude-style tool rows
 - **RTK rewrite integration** that folds rewrite notices into the bash tool row with a muted `(RTK)` badge and expanded-only rewrite details
-- **Transparent tool backgrounds** in `transparent` or `border` mode
+- **Transparent tool backgrounds** in `transparent` or `outlines` mode
 - **Theme-adaptive palette** — borders, branch connectors, dim text, spinner accent, and diff backgrounds automatically follow the active pi theme (set `themeAdaptive: false` to keep the fixed Claude-style palette)
 - **Light Ghostty-sync themes** — edit/write diffs use `github-light` highlighting and light-tinted diff rows; tool pending dots use softer chrome colors
 - **Transparent edit/write diffs** with universal red/green diff colors
@@ -37,11 +37,13 @@ Claude Code inspired tool rendering for Pi — Shiki-powered diffs, status dots,
 
 ## Configuration
 
-Set in `.pi/settings.json` or `~/.pi/settings.json`:
+> **This fork ships opinionated defaults** (see below) — you don't need to set
+> anything to get the Claude Code dark look. All settings are still available
+> to override in `.pi/settings.json` or `~/.pi/settings.json`.
 
 ```json
 {
-  "toolBackground": "border",
+  "toolBackground": "transparent",
   "readOutputMode": "preview",
   "searchOutputMode": "preview",
   "mcpOutputMode": "preview",
@@ -51,14 +53,52 @@ Set in `.pi/settings.json` or `~/.pi/settings.json`:
   "extraToolOutputExpanded": false,
   "groupToolCalls": true,
   "bashOutputMode": "opencode",
-  "bashCollapsedLines": 10,
+  "bashCollapsedLines": 24,
   "liveToolPreview": true,
   "liveToolPreviewLines": 5,
   "diffCollapsedLines": 24,
   "themeAdaptive": true,
-  "diffTheme": "github-dark"
+  "diffTheme": "claude-code-dark"
 }
 ```
+
+### Fork defaults (baked in — no config needed)
+
+These are the hardcoded defaults in this fork, so the UI matches Claude Code
+out of the box. Set any of them to `false`/another value to opt out:
+
+| Setting | Fork default | Effect |
+|---------|-------------|--------|
+| `hideThinkingBlock` | `false` | Thinking blocks are shown (pi default; required for dsh thinking) |
+| `dshStyleThinking` | `true` | Thinking expands while streaming, collapses to `∴ Thinking · Ns` after |
+| `dshStyleUserMessage` | `true` | `❯ text` user bubble on `userMessageBg`, no rounded border box |
+| `dshStyleInputPrompt` | `true` | `❯ ` before the editor text (dsh-TUI PromptInput look) |
+| `dshStyleSimpleCodeBlocks` | `true` | Fenced code blocks render as plain markdown (no rounded box) |
+| `dshStylePlainDiff` | `true` | Diffs keep red/green fg but drop tinted row backgrounds |
+| `toolBackground` | `transparent` | Transparent tool backgrounds |
+| `bashCollapsedLines` | `24` | Lines for collapsed bash output |
+| `liveToolPreview` | `true` | Live output preview while tools are still running |
+| `diffTheme` | `claude-code-dark` | Default diff palette preset (see below) |
+| `autoClaudeDarkTheme` | `true` | Auto-selects the bundled `claude-code-dark` pi theme when the current theme is a built-in default |
+
+### Bundled `claude-code-dark` theme
+
+The fork ships the [`claude-code-dark`](themes/claude-code-dark.json) pi theme
+and registers it via `resources_discover`, so it is available on every install
+without copying files. On first load, if your active pi theme is a built-in
+`dark`/`light` default, the fork auto-switches to `claude-code-dark`. Set
+`autoClaudeDarkTheme: false` in settings to keep your own theme, or pick the
+theme manually:
+
+```bash
+# settings.json
+{
+  "theme": "claude-code-dark"
+}
+```
+
+With the claude-code-dark theme active and `themeAdaptive: true` (default), the
+tool chrome, diff accents, and spinner colors all derive from that theme.
 
 ### Theme integration
 
@@ -111,14 +151,14 @@ The selection is persisted as `spinnerVerbColor` / `spinnerStatusColor` in `~/.p
 | Value | Behavior |
 |-------|----------|
 | `default` | Standard Pi tool backgrounds |
-| `transparent` | Transparent tool backgrounds |
-| `border` | Transparent backgrounds with top/bottom border lines |
+| `transparent` | Transparent tool backgrounds (**fork default**) |
+| `outlines` | Transparent backgrounds with top/bottom border lines |
 
 Use `/cc-tools` to control tool UI at runtime:
 
 ```text
 /cc-tools status          # show style, grouping, and extra-detail state
-/cc-tools outlines        # tool style: outlines, transparent, or default
+/cc-tools transparent     # tool style: outlines, transparent, or default
 /cc-tools group toggle    # toggle grouped adjacent/concurrent tool calls
 /cc-tools group off       # disable grouping (also ungroups current grouped rows)
 /cc-tools detail toggle   # same mode as Ctrl+Shift+O
@@ -142,12 +182,17 @@ Use `/cc-tools` to control tool UI at runtime:
 | `extraExpandedPreviewMaxLines` | `12000` | Max lines after Ctrl+Shift+O extra-detail mode |
 | `extraToolOutputExpanded` | `false` | Start with Ctrl+Shift+O extra-detail mode enabled |
 | `groupToolCalls` | `true` | Group adjacent/concurrent tool calls under a compact status header |
-| `bashCollapsedLines` | `10` | Lines for collapsed bash output |
+| `bashCollapsedLines` | `24` | Lines for collapsed bash output (fork default) |
 | `liveToolPreview` | `true` | Show a small live output preview while tools are still running |
 | `liveToolPreviewLines` | `5` | Lines shown in the collapsed live preview |
 | `diffCollapsedLines` | `24` | Diff lines before collapsing |
-| `dshStyleThinking` | `false` | (Requires pi `hideThinkingBlock: false`) dsh-TUI-style thinking: expanded while streaming, collapses to `∴ Thinking · Ns (ctrl+o to expand)` after completion. Ctrl+O also expands/collapses thinking summaries (pi's tool-expansion loop now includes assistant messages). |
-| `dshStyleUserMessage` | `false` | dsh-TUI-style user messages: `❯ text` on the theme's grey `userMessageBg` background with no rounded border box. |
+| `diffTheme` | `claude-code-dark` | Diff preset (`default`, `midnight`, `neon`, `claude-code-dark`, …). Also accepts Shiki theme names like `github-dark` |
+| `dshStyleThinking` | `true` | (Requires pi `hideThinkingBlock: false`) dsh-TUI-style thinking: expanded while streaming, collapses to `∴ Thinking · Ns (ctrl+o to expand)` after completion. Ctrl+O also expands/collapses thinking summaries (pi's tool-expansion loop now includes assistant messages). |
+| `dshStyleUserMessage` | `true` | dsh-TUI-style user messages: `❯ text` on the theme's grey `userMessageBg` background with no rounded border box. |
+| `dshStyleInputPrompt` | `true` | `❯ ` before the editor text (dsh-TUI PromptInput look). |
+| `dshStyleSimpleCodeBlocks` | `true` | Fenced code blocks render as plain markdown (no rounded border box). |
+| `dshStylePlainDiff` | `true` | Diffs keep red/green fg colors but drop the tinted row backgrounds. |
+| `autoClaudeDarkTheme` | `true` | Auto-select the bundled `claude-code-dark` theme when on a built-in default theme. |
 
 ## Notes
 
