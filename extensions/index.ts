@@ -69,6 +69,9 @@ const UI_NOTIFY_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-ui-notifi
 const WRAP_MARK = "\uE000";
 const KITTY_IMAGE_PREFIX = "\x1b_G";
 const ITERM2_IMAGE_PREFIX = "\x1b]1337;File=";
+const POINTER = "❯";
+/** Key stored on AssistantMessageComponent for dsh-style thinking expanded state. */
+const THINKING_EXPANDED_KEY = Symbol.for("pi-claude-style-tools:thinking-expanded");
 
 let toolBackgroundMode: "default" | "transparent" | "outlines" = "outlines";
 
@@ -116,6 +119,21 @@ interface SettingsFile {
 	toolBranchRgbGray?: number;
 	/** `fixed` (default): rgb gray 72, theme-independent. `theme`: dim → muted → borderMuted. */
 	toolBranchColorMode?: "theme" | "fixed";
+	/**
+	 * dsh-TUI style thinking (requires `hideThinkingBlock: false` in pi
+	 * settings): thinking is expanded while the assistant message is still
+	 * streaming, then collapses to a one-line summary
+	 * `∴ Thinking · 12s (ctrl+o to expand)` once the message completes.
+	 * Ctrl+O toggles the collapsed summaries back to full text (the same
+	 * key that expands tool output). Defaults to false.
+	 */
+	dshStyleThinking?: boolean;
+	/**
+	 * dsh-TUI style user messages: `❯ text` on the theme's grey
+	 * `userMessageBg` background with no rounded border box. Defaults to
+	 * false (keeps the existing rounded `╭ User ╮` border box).
+	 */
+	dshStyleUserMessage?: boolean;
 }
 
 let _settingsCache: { value: SettingsFile; timestamp: number } | null = null;
@@ -175,6 +193,11 @@ function writeSettingsKey(key: string, value: unknown): void {
 
 let toolBackgroundOverride: "default" | "transparent" | "outlines" | null = null;
 
+/** Tracks the last global tool-output-expanded state (set by pi's Ctrl+O
+ *  handler via our patched setExpanded). dsh-style thinking reads this so
+ *  messages created after Ctrl+O was pressed stay expanded until collapsed. */
+let lastToolExpandedState = false;
+
 function syncToolBackgroundMode(): void {
 	if (toolBackgroundOverride) {
 		toolBackgroundMode = toolBackgroundOverride;
@@ -195,6 +218,14 @@ function setThemeBg(theme: unknown, key: string, value: string): void {
 	}
 }
 
+function dshStyleThinkingEnabled(): boolean {
+	return readSettings().dshStyleThinking === true;
+}
+
+function dshStyleUserMessageEnabled(): boolean {
+	return readSettings().dshStyleUserMessage === true;
+}
+
 const PI_GLOBAL_THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
 
 function getGlobalPiTheme(): unknown {
@@ -209,7 +240,11 @@ function applyToolBackgroundMode(theme: unknown): void {
 	const globalTheme = getGlobalPiTheme();
 	if (globalTheme) targets.add(globalTheme);
 	for (const t of targets) {
-		setThemeBg(t, "userMessageBg", TRANSPARENT_BG);
+		// dsh-style user messages keep the theme's grey `userMessageBg`
+		// (❯ bubble); only the bordered mode flattens it to transparent.
+		if (!dshStyleUserMessageEnabled()) {
+			setThemeBg(t, "userMessageBg", TRANSPARENT_BG);
+		}
 		if (toolBackgroundMode === "default") continue;
 		setThemeBg(t, "toolPendingBg", TRANSPARENT_BG);
 		setThemeBg(t, "toolSuccessBg", TRANSPARENT_BG);
@@ -1300,6 +1335,22 @@ function thoughtDurationSummaryText(ms: number): string {
 	return thinkingSummaryStyledText(`Thought for ${formatThoughtDuration(ms)}`);
 }
 
+/**
+ * dsh-TUI style collapsed thinking summary:
+ * `∴ Thinking · 12s (ctrl+o to expand)` — dim, with the `∴` marker, the
+ * reasoning duration (when >= MIN_THINKING_SUMMARY_MS), and the Ctrl+O hint
+ * that mirrors the key which expands tool output (and now thinking too).
+ */
+function dshThinkingSummaryText(durationMs: number | undefined): string {
+	const duration =
+		typeof durationMs === "number" && durationMs >= MIN_THINKING_SUMMARY_MS
+			? ` · ${formatThoughtDuration(durationMs)}`
+			: "";
+	const hint = ` (${rawKeyHint("ctrl+o", "to expand")})`;
+	const body = `∴ Thinking${duration}${hint}`;
+	return `${WORKED_LINE_FG}${body}${RESET}`;
+}
+
 /** Single-line hidden thinking row — no Text paddingX or thinking symbol. */
 class HiddenThinkingSummary {
 	private summaryText: string;
@@ -2039,6 +2090,20 @@ function cleanUserMessageLine(line: string): string {
 	return `${TRANSPARENT_BG}${trimAnsiRight(stripBackgroundAnsi(stripOsc133Zones(line)))}${TRANSPARENT_BG}`;
 }
 
+/** Grey `userMessageBg` panel ANSI for dsh-style user bubbles. */
+function dshUserMessageBgAnsi(): string {
+	try {
+		const theme = getGlobalPiTheme();
+		if (theme && typeof (theme as any).getBgAnsi === "function") {
+			const ansi = (theme as any).getBgAnsi("userMessageBg");
+			if (typeof ansi === "string" && ansi && ansi !== TRANSPARENT_BG) return ansi;
+		}
+	} catch { /* fall through to the fallback */ }
+	// Fallback grey panel (reads as a subtle box on dark terminals) when the
+	// theme is unavailable or its userMessageBg is the transparent override.
+	return "\x1b[48;2;42;45;52m";
+}
+
 function borderedUserMessageLine(line: string, width: number): string {
 	const innerWidth = Math.max(1, width - 4);
 	const content = clampLineWidth(cleanUserMessageLine(line), innerWidth);
@@ -2071,6 +2136,20 @@ function patchUserMessageRender(): void {
 				child.invalidate?.();
 			}
 		});
+		if (dshStyleUserMessageEnabled()) {
+			// dsh-TUI style user message: `❯ text` on the theme's grey
+			// userMessageBg, no rounded border box.
+			const bg = dshUserMessageBgAnsi();
+			const rawLines = originalRender.call(this, Math.max(1, width));
+			if (!Array.isArray(rawLines) || rawLines.length === 0) return rawLines;
+			const rendered = rawLines.map((line: string, index: number) => {
+				const clean = trimAnsiRight(stripBackgroundAnsi(stripOsc133Zones(line)));
+				const trimmed = index === 0 ? clean.replace(/^[ \t]+/, "") : clean;
+				const prefix = index === 0 ? `${POINTER} ` : "  ";
+				return clampLineWidth(`${bg}${prefix}${trimmed}${TRANSPARENT_RESET}`, width);
+			});
+			return storeMessageRenderCache(this, width, applyTerminalCopyZones(rendered));
+		}
 		const borderWidth = Math.max(1, width);
 		const contentWidth = Math.max(1, borderWidth - 4);
 		const lines = originalRender.call(this, contentWidth);
@@ -2106,7 +2185,7 @@ function patchAssistantMessages(): void {
 		proto[ASSISTANT_RENDER_PATCH_FLAG] = true;
 	}
 	const originalUpdateContent = proto.updateContent;
-	proto.updateContent = function patchedUpdateContent(message: any) {
+	proto.updateContent = function patchedUpdateContent(message: any, isStreaming?: boolean) {
 		// Content changed (also reached via invalidate() → updateContent): drop the
 		// cached rendered output so the next render rebuilds with the new children.
 		clearMessageRenderCache(this);
@@ -2114,14 +2193,17 @@ function patchAssistantMessages(): void {
 			(this as any)[WORKED_START_KEY] = Date.now();
 		}
 		if (!message || !Array.isArray(message.content)) {
-			return originalUpdateContent.call(this, message);
+			return originalUpdateContent.call(this, message, isStreaming as any);
 		}
 		if ((this as any).hideThinkingBlock && messageHasThinkingContent(message)) {
 			// Pi wraps this in theme.italic/fg again — keep plain label for the placeholder pass.
 			(this as any).hiddenThinkingLabel = "Thinking…";
 		}
-		// Call original to build all children (text, thinking, spacers, errors)
-		originalUpdateContent.call(this, message);
+		// Call original to build all children (text, thinking, spacers, errors).
+		// Pass isStreaming through so pi's internal streaming state (and thus
+		// markdown streaming transforms) stays accurate; dsh-style thinking
+		// collapse depends on this state via `(this as any).isStreaming`.
+		originalUpdateContent.call(this, message, isStreaming as any);
 		// Replace text-block Markdown children with DottedParagraph wrappers
 		const container = (this as any).contentContainer;
 		if (!container?.children) return;
@@ -2129,6 +2211,16 @@ function patchAssistantMessages(): void {
 			replaceHiddenThinkingPlaceholders(container, message);
 		}
 		const mdTheme = (this as any).markdownTheme;
+		// dsh-style thinking (requires pi hideThinkingBlock=false): the block is
+		// expanded while the message streams, then collapses to a one-line
+		// `∴ Thinking · 12s (ctrl+o to expand)` summary once it completes. The
+		// user-expanded state (Ctrl+O via setExpanded) keeps it expanded even
+		// after completion, mirroring dsh-TUI's `verbose || streaming` rule.
+		const dshThinking = dshStyleThinkingEnabled() && !(this as any).hideThinkingBlock;
+		const thinkingExpanded = !dshThinking
+			|| isStreaming === true
+			|| (this as any)[THINKING_EXPANDED_KEY] === true
+			|| lastToolExpandedState === true;
 		for (let i = container.children.length - 1; i >= 0; i--) {
 			const child = container.children[i];
 			if (child instanceof Markdown) {
@@ -2137,7 +2229,17 @@ function patchAssistantMessages(): void {
 				const isThinking = !!(child as any).defaultTextStyle?.italic;
 				if (isThinking) {
 					const style = (child as any).defaultTextStyle;
-					container.children[i] = new ThinkingParagraph(text, mdTheme, style);
+					if (dshThinking && !thinkingExpanded) {
+						// Collapsed summary: prefer the per-message duration stamped at
+						// thinking_end, falling back to the global last duration.
+						const stored = (message as any)[THINKING_DURATION_KEY];
+						const duration = typeof stored === "number"
+							? stored
+							: lastThinkingBlockDurationMs;
+						container.children[i] = new HiddenThinkingSummary(dshThinkingSummaryText(duration));
+					} else {
+						container.children[i] = new ThinkingParagraph(text, mdTheme, style);
+					}
 				} else {
 					container.children[i] = new DottedParagraph(text, mdTheme);
 				}
@@ -2168,6 +2270,25 @@ function patchAssistantMessages(): void {
 		const hasAssistantText = message.content.some((block: any) => block?.type === "text" && typeof block.text === "string" && block.text.trim());
 		if (typeof workedDuration === "number" && isFinalAssistantMessage && hasAssistantText && !hasWorkedDurationLine(message)) {
 			container.children.push(new Spacer(1), new Text(workedDurationText(workedDuration, workedSessionTotal, workedTurns), 1, 0));
+		}
+	};
+	// Make assistant messages expandable so pi's Ctrl+O tool-expansion loop
+	// (setToolsExpanded → chatContainer children → setExpanded) also expands
+	// collapsed dsh-style thinking summaries — matching dsh-TUI's verbose mode
+	// where Ctrl+O shows the full thinking text again. Harmless no-op for
+	// messages without thinking blocks.
+	const originalSetExpanded = proto.setExpanded as ((expanded: boolean) => void) | undefined;
+	proto.setExpanded = function patchedAssistantSetExpanded(expanded: boolean) {
+		if (typeof originalSetExpanded === "function") {
+			try { originalSetExpanded.call(this, expanded); } catch { /* noop */ }
+		}
+		if (!dshStyleThinkingEnabled()) return;
+		lastToolExpandedState = expanded;
+		if ((this as any)[THINKING_EXPANDED_KEY] === expanded) return;
+		(this as any)[THINKING_EXPANDED_KEY] = expanded;
+		const last = (this as any).lastMessage;
+		if (last && Array.isArray(last.content) && last.content.some((block: any) => block?.type === "thinking" && typeof block.thinking === "string" && block.thinking.trim())) {
+			try { (this as any).updateContent(last, (this as any).isStreaming); } catch { /* noop */ }
 		}
 	};
 	proto[ASSISTANT_PATCH_FLAG] = true;
@@ -6887,9 +7008,11 @@ export default function (pi: ExtensionAPI) {
 	// Session rebuild (resume/reload/fork) must not leave history partials blinking.
 	pi.on("session_start", async () => {
 		_clearAllBlinkContexts();
+		lastToolExpandedState = false;
 	});
 	pi.on("session_shutdown", async () => {
 		_clearAllBlinkContexts();
+		lastToolExpandedState = false;
 		clearRtkRewriteState();
 		WRITE_EXISTED_BEFORE.clear();
 		clearHighlightCache();

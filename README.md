@@ -146,6 +146,8 @@ Use `/cc-tools` to control tool UI at runtime:
 | `liveToolPreview` | `true` | Show a small live output preview while tools are still running |
 | `liveToolPreviewLines` | `5` | Lines shown in the collapsed live preview |
 | `diffCollapsedLines` | `24` | Diff lines before collapsing |
+| `dshStyleThinking` | `false` | (Requires pi `hideThinkingBlock: false`) dsh-TUI-style thinking: expanded while streaming, collapses to `∴ Thinking · Ns (ctrl+o to expand)` after completion. Ctrl+O also expands/collapses thinking summaries (pi's tool-expansion loop now includes assistant messages). |
+| `dshStyleUserMessage` | `false` | dsh-TUI-style user messages: `❯ text` on the theme's grey `userMessageBg` background with no rounded border box. |
 
 ## Notes
 
