@@ -37,7 +37,7 @@
     "thinkingText": "muted",
     "selectedBg": "elevated",
     "scrollbarThumb": "borderStrong",
-    "userMessageBg": "elevated",
+    "userMessageBg": "#262625",
     "userMessageText": "text",
     "customMessageBg": "elevated",
     "customMessageText": "text",

@@ -2245,11 +2245,11 @@ function patchUserMessageRender(): void {
  *   <text>■<pad>     (content lines; ■ = inverse block cursor)
  *   ──────────────   (bottom border / scroll-down indicator)
  *
- * This patch inserts `❯ ` after the leading padding on the FIRST content
- * line and reclaims 2 trailing padding columns so the total width is
- * unchanged (pi asserts rendered line widths). When the first line is fully
- * packed (no trailing padding to reclaim), the prompt is skipped for that
- * line to avoid overflowing. The block cursor (`\x1b[7m`) is untouched.
+ * This patch ensures the editor has at least 2 columns of leading padding
+ * (paddingX >= 2) when the feature is enabled, then replaces the first 2
+ * leading padding spaces with `❯ ` on the FIRST content line. Continuation
+ * lines from word-wrap keep their natural indent via the remaining leading
+ * padding. The block cursor (`\x1b[7m`) is untouched.
  */
 function patchEditorPrompt(): void {
 	const proto = Editor.prototype as any;
@@ -2257,20 +2257,31 @@ function patchEditorPrompt(): void {
 	const originalRender = proto.render;
 	if (typeof originalRender !== "function") return;
 	proto.render = function patchedEditorRender(width: number) {
+		// Ensure enough leading padding so `❯ ` can always be inserted
+		// without overflowing the rendered line (paddingX=0 gives no room).
+		if (dshStyleInputPromptEnabled() && (this as any).paddingX < 2) {
+			(this as any).paddingX = 2;
+		}
 		const lines = originalRender.call(this, width);
 		if (!Array.isArray(lines) || lines.length < 3 || !dshStyleInputPromptEnabled()) return lines;
 		// Index 0 is the top border (or scroll-up indicator); the last index is
 		// the bottom border (or scroll-down indicator); content lines sit between.
 		const first = lines[1];
 		if (typeof first !== "string") return lines;
-		const leadMatch = first.match(/^[ \t]*/);
-		const lead = leadMatch ? leadMatch[0] : "";
+		// Prefer replacing 2 leading padding spaces (always present when
+		// paddingX >= 2, which we guarantee above).
+		const lead = first.match(/^[ \t]*/)?.[0] ?? "";
+		if (lead.length >= 2) {
+			lines[1] = `${POINTER} ${first.slice(2)}`;
+			return lines;
+		}
+		// Fallback: steal 2 trailing padding columns.
 		const rest = first.slice(lead.length);
-		const trailMatch = rest.match(/[ \t]+$/);
-		const trail = trailMatch ? trailMatch[0] : "";
-		if (trail.length < 2) return lines; // no padding room — keep width intact
-		const mid = rest.slice(0, rest.length - trail.length);
-		lines[1] = `${lead}${POINTER} ${mid}${trail.slice(0, trail.length - 2)}`;
+		const trail = rest.match(/[ \t]+$/)?.[0] ?? "";
+		if (trail.length >= 2) {
+			const mid = rest.slice(0, rest.length - trail.length);
+			lines[1] = `${lead}${POINTER} ${mid}${trail.slice(0, trail.length - 2)}`;
+		}
 		return lines;
 	};
 	proto[EDITOR_PROMPT_PATCH_FLAG] = true;
