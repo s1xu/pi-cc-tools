@@ -75,7 +75,7 @@ const POINTER = "❯";
 const THINKING_EXPANDED_KEY = Symbol.for("pi-claude-style-tools:thinking-expanded");
 const EDITOR_PROMPT_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-editor-prompt");
 
-let toolBackgroundMode: "default" | "transparent" | "outlines" = "outlines";
+let toolBackgroundMode: "default" | "transparent" | "outlines" = "transparent";
 
 interface SettingsFile {
 	toolBackground?: "default" | "transparent" | "outlines" | "border";
@@ -88,6 +88,7 @@ interface SettingsFile {
 	extraToolOutputExpanded?: boolean;
 	groupToolCalls?: boolean;
 	bashOutputMode?: "opencode" | "summary" | "preview";
+	/** Lines shown for collapsed bash output. Defaults to 24 in this fork. */
 	bashCollapsedLines?: number;
 	/** Show a small live output preview while tools are still running. Defaults to true. */
 	liveToolPreview?: boolean;
@@ -234,7 +235,8 @@ function syncToolBackgroundMode(): void {
 	const settings = readSettings();
 	// Backward compat: "border" was renamed to "outlines"
 	const raw = settings.toolBackground === "border" ? "outlines" : settings.toolBackground;
-	toolBackgroundMode = raw ?? "outlines";
+	// Default to transparent unless the user explicitly picks another mode.
+	toolBackgroundMode = raw ?? "transparent";
 }
 
 function setThemeBg(theme: unknown, key: string, value: string): void {
@@ -3203,7 +3205,7 @@ function expandedPreviewLimit(): number {
 
 function bashCollapsedLimit(): number {
 	const value = readSettings().bashCollapsedLines;
-	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 10;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : 24;
 }
 
 function liveToolPreviewEnabled(): boolean {
@@ -6213,8 +6215,8 @@ export default function (pi: ExtensionAPI) {
 							: m === "detail" ? "Toggle Ctrl+Shift+O extra-detail mode"
 							: m === "branch" ? "├ └ │ gray (0-255), theme, fixed, or reset"
 							: m === "status" ? "Show tool UI settings"
-							: m === "outlines" ? "Horizontal rules around each tool (default)"
-							: m === "transparent" ? "No borders or backgrounds"
+							: m === "outlines" ? "Horizontal rules around each tool"
+							: m === "transparent" ? "No borders or backgrounds (default)"
 							: "Pi built-in tool backgrounds",
 					}));
 			}
@@ -6650,8 +6652,20 @@ export default function (pi: ExtensionAPI) {
 			text += theme.fg("muted", ` (${nonEmpty.total} lines)`);
 			if (details?.truncation?.truncated) text += theme.fg("warning", " [truncated]");
 			const persistentPreview = shouldPreserveBashPreview(ctx) ? buildPersistentBashPreview(nonEmpty.lines, theme) : "";
-			if (!expanded && persistentPreview) return makeText(ctx.lastComponent, withBranch(`${text}${toolOutputDetailHint(theme, expanded)}\n${persistentPreview}`, theme));
-			if (!expanded && nonEmpty.total > 0) return makeText(ctx.lastComponent, withBranch(`${text}${toolOutputDetailHint(theme, expanded)}`, theme));
+			// Collapsed bash always shows a preview tail of the output (not just
+			// the preserved live preview), so results are visible like dsh-TUI.
+			if (!expanded && nonEmpty.total > 0) {
+				const collapsed = bashCollapsedLimit();
+				const preview = persistentPreview || buildPreviewText(
+					nonEmpty.lines,
+					false,
+					theme,
+					collapsed,
+					nonEmpty.total,
+					(line) => theme.fg("dim", line),
+				);
+				return makeText(ctx.lastComponent, withBranch(`${text}${toolOutputDetailHint(theme, expanded)}\n${preview}`, theme));
+			}
 			if (!expanded) return makeText(ctx.lastComponent, withBranch(text, theme));
 			const collapsed = bashCollapsedLimit();
 			if (rewrite) text += `\n${formatRtkRewriteDetails(rewrite, theme)}`;
