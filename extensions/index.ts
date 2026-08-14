@@ -3333,11 +3333,32 @@ const DIFF_PRESETS: Record<string, DiffPreset> = {
 		fgStripe: "#303030",
 		fgSafeMuted: "#9da5ae",
 	},
+	"claude-code-dark": {
+		name: "claude-code-dark",
+		description: "Claude Code dark diff palette (default in this fork)",
+		bgAdd: "#122a1a",
+		bgDel: "#2a1212",
+		bgAddHighlight: "#1f4a2a",
+		bgDelHighlight: "#4a1f1f",
+		bgGutterAdd: "#0e2415",
+		bgGutterDel: "#240e0e",
+		bgEmpty: "#0d0d0d",
+		fgDim: "#555555",
+		fgLnum: "#6a6a6a",
+		fgRule: "#333333",
+		fgStripe: "#262626",
+		fgSafeMuted: "#9da5ae",
+	},
 };
 
 function loadDiffConfig(): DiffUserConfig {
 	const settings = readSettings();
-	return { diffTheme: settings.diffTheme, diffColors: settings.diffColors };
+	// Honor an explicit diffTheme choice. Otherwise default to the bundled
+	// claude-code-dark preset so the fork's diff look matches Claude Code dark.
+	if (settings.diffTheme) {
+		return { diffTheme: settings.diffTheme, diffColors: settings.diffColors };
+	}
+	return { diffTheme: "claude-code-dark", diffColors: settings.diffColors };
 }
 
 // 6x6x6 color cube channel values used by pi's 256color fallback.
@@ -3750,8 +3771,10 @@ function isLightThemeBackground(theme: any): boolean {
 
 function syncDiffShikiTheme(theme: any): void {
 	if (process.env.DIFF_THEME) return;
-	const config = loadDiffConfig();
-	if (config.diffTheme) return;
+	// Only an explicit user diffTheme choice pins the Shiki syntax theme; the
+	// fork's default claude-code-dark preset still auto-picks github-light for
+	// light terminals.
+	if (readSettings().diffTheme) return;
 	_diffOnLightBg = isLightThemeBackground(theme);
 	DIFF_THEME = (_diffOnLightBg ? "github-light" : "github-dark") as BundledTheme;
 	clearHighlightCache();
@@ -3999,6 +4022,17 @@ function applyDiffPalette(): void {
 
 	const shiki = overrides.shikiTheme ?? preset?.shikiTheme;
 	if (shiki) DIFF_THEME = shiki as BundledTheme;
+
+	// dsh-TUI style plain diffs: drop tinted row backgrounds even when an
+	// explicit diffTheme preset supplied them (red/green foregrounds stay).
+	if (dshStylePlainDiffEnabled()) {
+		BG_ADD = TRANSPARENT_BG;
+		BG_DEL = TRANSPARENT_BG;
+		BG_ADD_W = TRANSPARENT_BG;
+		BG_DEL_W = TRANSPARENT_BG;
+		BG_GUTTER_ADD = TRANSPARENT_BG;
+		BG_GUTTER_DEL = TRANSPARENT_BG;
+	}
 
 	DIVIDER = `${FG_RULE}│${D_RST}`;
 	DEFAULT_DIFF_COLORS = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_DIM };
