@@ -140,6 +140,15 @@ interface SettingsFile {
 	 */
 	dshStyleUserMessage?: boolean;
 	/**
+	 * Background of dsh-style user message bubbles:
+	 * - `"theme"` (default): use the active theme's `userMessageBg` color
+	 *   (renders transparent when the theme doesn't define that key).
+	 * - `"transparent"`: no background at all — `❯ text` sits directly on
+	 *   the page background. Useful when the terminal flips to a light
+	 *   scheme and the theme's dark bubble would look jarring.
+	 */
+	dshUserMessageBg?: "theme" | "transparent";
+	/**
 	 * dsh-TUI style input prompt: show `❯ ` before the editor text, matching
 	 * the dsh-TUI PromptInput look. The block cursor remains. Defaults to
 	 * true in this fork (set to false for the plain editor).
@@ -263,6 +272,11 @@ function dshStyleThinkingEnabled(): boolean {
 
 function dshStyleUserMessageEnabled(): boolean {
 	return readSettings().dshStyleUserMessage !== false;
+}
+
+/** `"transparent"` opts the dsh bubble out of any background; `"theme"` (default) uses the theme's userMessageBg. */
+function dshUserMessageBgMode(): "theme" | "transparent" {
+	return readSettings().dshUserMessageBg === "transparent" ? "transparent" : "theme";
 }
 
 function dshStyleInputPromptEnabled(): boolean {
@@ -2143,6 +2157,7 @@ function cleanUserMessageLine(line: string): string {
 
 /** `userMessageBg` panel ANSI for dsh-style user bubbles. */
 function dshUserMessageBgAnsi(): string {
+	if (dshUserMessageBgMode() === "transparent") return TRANSPARENT_BG;
 	try {
 		const theme = getGlobalPiTheme();
 		if (theme && typeof (theme as any).getBgAnsi === "function") {

@@ -20,6 +20,7 @@
   "hideThinkingBlock": false,
   "dshStyleThinking": true,
   "dshStyleUserMessage": true,
+  "dshUserMessageBg": "theme",  // "theme" | "transparent" — "transparent" removes the bubble background
   "dshStyleInputPrompt": true,
   "dshStyleSimpleCodeBlocks": true,
   "dshStylePlainDiff": true

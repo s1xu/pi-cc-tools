@@ -79,6 +79,7 @@ out of the box. Set any of them to `false`/another value to opt out:
 | `hideThinkingBlock` | `false` | Thinking blocks are shown (pi default; required for dsh thinking) |
 | `dshStyleThinking` | `true` | Thinking expands while streaming, collapses to `∴ Thinking · Ns` after |
 | `dshStyleUserMessage` | `true` | `❯ text` user bubble on `userMessageBg`, no rounded border box |
+| `dshUserMessageBg` | `"theme"` | Background color for the user message bubble (`"theme"` = follow current theme, `"transparent"` = no box) |
 | `dshStyleInputPrompt` | `true` | `❯ ` before the editor text (dsh-TUI PromptInput look) |
 | `dshStyleSimpleCodeBlocks` | `true` | Fenced code blocks render as plain markdown (no rounded box) |
 | `dshStylePlainDiff` | `true` | Diffs keep red/green fg but drop tinted row backgrounds |
@@ -197,6 +198,7 @@ Use `/cc-tools` to control tool UI at runtime:
 | `diffTheme` | `claude-code-dark` | Diff preset (`default`, `midnight`, `neon`, `claude-code-dark`, …). Also accepts Shiki theme names like `github-dark` |
 | `dshStyleThinking` | `true` | (Requires pi `hideThinkingBlock: false`) dsh-TUI-style thinking: expanded while streaming, collapses to `∴ Thinking · Ns (ctrl+o to expand)` after completion. Ctrl+O also expands/collapses thinking summaries (pi's tool-expansion loop now includes assistant messages). |
 | `dshStyleUserMessage` | `true` | dsh-TUI-style user messages: `❯ text` on the theme's grey `userMessageBg` background with no rounded border box. |
+| `dshUserMessageBg` | `"theme"` | User bubble background: `"theme"` follows the active theme's `userMessageBg` (transparent if unset), `"transparent"` renders `❯ text` with no box (handy when the terminal flips to a light scheme). |
 | `dshStyleInputPrompt` | `true` | `❯ ` before the editor text (dsh-TUI PromptInput look). |
 | `dshStyleSimpleCodeBlocks` | `true` | Fenced code blocks render as plain markdown (no rounded border box). |
 | `dshStylePlainDiff` | `true` | Diffs keep red/green fg colors but drop the tinted row backgrounds. |
