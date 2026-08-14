@@ -84,8 +84,9 @@ out of the box. Set any of them to `false`/another value to opt out:
 ### Bundled `claude-code-dark` theme
 
 The fork ships the [`claude-code-dark`](themes/claude-code-dark.json) pi theme
-and registers it via `resources_discover`, so it is available on every install
-without copying files. On first load, if your active pi theme is a built-in
+and auto-installs it into Pi's user themes directory on first load, so it is
+available to Pi's startup theme resolution without conflicts. On first load,
+if your active pi theme is a built-in
 `dark`/`light` default, the fork auto-switches to `claude-code-dark`. Set
 `autoClaudeDarkTheme: false` in settings to keep your own theme, or pick the
 theme manually:

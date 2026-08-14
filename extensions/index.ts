@@ -6206,6 +6206,40 @@ function bundledThemePath(): string | undefined {
 	return undefined;
 }
 
+/**
+ * Pi's user custom-themes directory (e.g. ~/.pi/agent/themes/). Mirrors
+ * getCustomThemesDir() from the pi agent so we install the bundled theme
+ * where initTheme() can find it at startup.
+ */
+function customThemesDir(): string {
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";
+	return resolve(home, ".pi", "agent", "themes");
+}
+
+/**
+ * Copy the bundled claude-code-dark.json into Pi's user themes directory so
+ * it is available to initTheme() at startup (the persisted theme name is
+ * resolved from the themes dir before extensions run). Returns true if the
+ * file is in place afterwards. No-op when the extension has no bundled copy.
+ */
+function ensureBundledThemeInstalled(): boolean {
+	const bundled = bundledThemePath();
+	if (!bundled) return false;
+	const destDir = customThemesDir();
+	const dest = resolve(destDir, "claude-code-dark.json");
+	try {
+		const bundledContent = readFileSync(bundled, "utf-8");
+		if (existsSync(dest)) {
+			// Already installed; refresh only if the bundled copy changed.
+			if (readFileSync(dest, "utf-8") === bundledContent) return true;
+		}
+		mkdirSync(destDir, { recursive: true });
+		writeFileSync(dest, bundledContent, "utf-8");
+		return true;
+	} catch { /* best effort — fall back to registry auto-select below */ }
+	return false;
+}
+
 // ===========================================================================
 // Extension
 // ===========================================================================
@@ -7232,19 +7266,16 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Ship the bundled claude-code-dark theme so the fork's look is available
-	// to every install, even without a local ~/.pi/themes copy.
-	pi.on("resources_discover", async () => {
-		const themePath = bundledThemePath();
-		return themePath ? { themePaths: [themePath] } : undefined;
-	});
-
-	// Default the active pi theme to the bundled claude-code-dark unless the
-	// user has explicitly chosen another (non built-in) theme. Set
-	// `autoClaudeDarkTheme: false` in settings.json to opt out.
+	// to every install. We install it into Pi's user themes dir (which
+	// initTheme() scans at startup) instead of using resources_discover: the
+	// extension theme registry is only populated *after* session_start, so a
+	// registry-only theme is invisible to the persisted-theme load and to the
+	// auto-select below on first boot.
 	pi.on("session_start", async (_event, ctx) => {
 		if (!ctx.hasUI) return;
 		if (readSettings().autoClaudeDarkTheme === false) return;
 		try {
+			ensureBundledThemeInstalled();
 			const currentName = (ctx.ui.theme as any)?.name;
 			// Only take over when the user is on a built-in default theme.
 			if (currentName && currentName !== "dark" && currentName !== "light") return;
