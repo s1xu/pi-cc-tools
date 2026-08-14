@@ -1,5 +1,12 @@
 # pi-claude-code-ui
 
+> [!NOTE]
+> **Personal fork** by [@s1xu](https://github.com/s1xu) of [`pi-cc-tools`](https://github.com/FammasMaz/pi-cc-tools).
+> This fork ships opinionated, Claude Code–style defaults out of the box (dsh-style
+> user messages/input prompt/thinking, transparent tool backgrounds, bundled
+> `claude-code-dark` theme, and more) — every default can still be opted out of in
+> `settings.json`. See the [Fork defaults](#fork-defaults-baked-in--no-config-needed) section below.
+
 > [!IMPORTANT]
 > **Package renamed in 1.0.69.** This project is now published as [`pi-claude-code-ui`](https://www.npmjs.com/package/pi-claude-code-ui) (was `pi-claude-style-tools`).
 >
