@@ -30,6 +30,7 @@ import {
 	Box,
 	Container,
 	deleteAllKittyImages,
+	Editor,
 	getCapabilities,
 	getImageDimensions,
 	imageFallback,
@@ -72,6 +73,7 @@ const ITERM2_IMAGE_PREFIX = "\x1b]1337;File=";
 const POINTER = "❯";
 /** Key stored on AssistantMessageComponent for dsh-style thinking expanded state. */
 const THINKING_EXPANDED_KEY = Symbol.for("pi-claude-style-tools:thinking-expanded");
+const EDITOR_PROMPT_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-editor-prompt");
 
 let toolBackgroundMode: "default" | "transparent" | "outlines" = "outlines";
 
@@ -125,15 +127,36 @@ interface SettingsFile {
 	 * streaming, then collapses to a one-line summary
 	 * `∴ Thinking · 12s (ctrl+o to expand)` once the message completes.
 	 * Ctrl+O toggles the collapsed summaries back to full text (the same
-	 * key that expands tool output). Defaults to false.
+	 * key that expands tool output). Defaults to true in this fork.
 	 */
 	dshStyleThinking?: boolean;
 	/**
 	 * dsh-TUI style user messages: `❯ text` on the theme's grey
 	 * `userMessageBg` background with no rounded border box. Defaults to
-	 * false (keeps the existing rounded `╭ User ╮` border box).
+	 * true in this fork (set to false for the Claude-style rounded
+	 * `╭ User ╮` border box).
 	 */
 	dshStyleUserMessage?: boolean;
+	/**
+	 * dsh-TUI style input prompt: show `❯ ` before the editor text, matching
+	 * the dsh-TUI PromptInput look. The block cursor remains. Defaults to
+	 * true in this fork (set to false for the plain editor).
+	 */
+	dshStyleInputPrompt?: boolean;
+	/**
+	 * dsh-TUI style code blocks: render fenced code blocks as plain markdown
+	 * (no `╭· lang ····· ╮` rounded border box) — only the syntax-highlighted
+	 * lines pass through. Defaults to true in this fork (set to false to
+	 * restore the Claude-style enclosure).
+	 */
+	dshStyleSimpleCodeBlocks?: boolean;
+	/**
+	 * dsh-TUI style diffs: keep the red/green diff foreground colors but drop
+	 * the tinted row backgrounds behind edit/write diff lines. Defaults to
+	 * true in this fork (set to false to restore GitHub-style green/red
+	 * background tints).
+	 */
+	dshStylePlainDiff?: boolean;
 }
 
 let _settingsCache: { value: SettingsFile; timestamp: number } | null = null;
@@ -223,12 +246,26 @@ function setThemeBg(theme: unknown, key: string, value: string): void {
 	}
 }
 
+// NOTE: all dsh-style options default to ON in this fork. Set the key to
+// false in settings.json to opt out (e.g. `"dshStyleThinking": false`).
 function dshStyleThinkingEnabled(): boolean {
-	return readSettings().dshStyleThinking === true;
+	return readSettings().dshStyleThinking !== false;
 }
 
 function dshStyleUserMessageEnabled(): boolean {
-	return readSettings().dshStyleUserMessage === true;
+	return readSettings().dshStyleUserMessage !== false;
+}
+
+function dshStyleInputPromptEnabled(): boolean {
+	return readSettings().dshStyleInputPrompt !== false;
+}
+
+function dshStyleSimpleCodeBlocksEnabled(): boolean {
+	return readSettings().dshStyleSimpleCodeBlocks !== false;
+}
+
+function dshStylePlainDiffEnabled(): boolean {
+	return readSettings().dshStylePlainDiff !== false;
 }
 
 const PI_GLOBAL_THEME_KEY = Symbol.for("@earendil-works/pi-coding-agent:theme");
@@ -409,7 +446,7 @@ function boxRenderedCodeBlock(bodyLines: string[], language: string, width: numb
 function sanitizeRenderedTextBlockLines(lines: string[], width?: number): string[] {
 	const result: string[] = [];
 	let i = 0;
-	const canBox = typeof width === "number" && width > 0;
+	const canBox = typeof width === "number" && width > 0 && !dshStyleSimpleCodeBlocksEnabled();
 	while (i < lines.length) {
 		const fence = parseRenderedFenceLine(lines[i]);
 		if (fence?.kind === "open") {
@@ -2147,12 +2184,33 @@ function patchUserMessageRender(): void {
 			const bg = dshUserMessageBgAnsi();
 			const rawLines = originalRender.call(this, Math.max(1, width));
 			if (!Array.isArray(rawLines) || rawLines.length === 0) return rawLines;
-			const rendered = rawLines.map((line: string, index: number) => {
-				const clean = trimAnsiRight(stripBackgroundAnsi(stripOsc133Zones(line)));
-				const trimmed = index === 0 ? clean.replace(/^[ \t]+/, "") : clean;
-				const prefix = index === 0 ? `${POINTER} ` : "  ";
-				return clampLineWidth(`${bg}${prefix}${trimmed}${TRANSPARENT_RESET}`, width);
-			});
+			// Pi's native UserMessageComponent wraps content in a Box with
+			// paddingY=1 (and paddingX=outputPad), so the raw render has a blank
+			// padding row above and below the message. Drop those leading/trailing
+			// blank rows so `❯` lands on the first content line (interior blank
+			// lines — markdown paragraph gaps — are preserved, aligned to content).
+			const cleaned = rawLines.map((line: string) => trimAnsiRight(stripBackgroundAnsi(stripOsc133Zones(line))));
+			let start = 0;
+			while (start < cleaned.length && cleaned[start].trim() === "") start++;
+			let end = cleaned.length - 1;
+			while (end >= start && cleaned[end].trim() === "") end--;
+			if (start > end) return rawLines;
+			// Strip the Box's paddingX (outputPad) from every line so continuation
+			// rows align at the `  ` indent instead of carrying a stray space.
+			const outputPad = Math.max(0, Number((this as any).outputPad) || 0);
+			const stripPad = (line: string): string => {
+				let out = line;
+				for (let k = 0; k < outputPad && out.startsWith(" "); k++) out = out.slice(1);
+				return out;
+			};
+			const rendered: string[] = [];
+			for (let i = start; i <= end; i++) {
+				const line = stripPad(cleaned[i]);
+				const isFirst = i === start;
+				const trimmed = isFirst ? line.replace(/^[ \t]+/, "") : line;
+				const prefix = isFirst ? `${POINTER} ` : "  ";
+				rendered.push(clampLineWidth(`${bg}${prefix}${trimmed}${TRANSPARENT_RESET}`, width));
+			}
 			return storeMessageRenderCache(this, width, applyTerminalCopyZones(rendered));
 		}
 		const borderWidth = Math.max(1, width);
@@ -2168,6 +2226,45 @@ function patchUserMessageRender(): void {
 		return storeMessageRenderCache(this, width, applyTerminalCopyZones(clamped));
 	};
 	proto[USER_MESSAGE_PATCH_FLAG] = true;
+}
+
+/**
+ * dsh-TUI style `❯ ` prompt on the input editor (pi-tui's `Editor`, the
+ * bordered single/multi-line input). Pi's editor renders:
+ *
+ *   ──────────────   (top border / scroll-up indicator)
+ *   <text>■<pad>     (content lines; ■ = inverse block cursor)
+ *   ──────────────   (bottom border / scroll-down indicator)
+ *
+ * This patch inserts `❯ ` after the leading padding on the FIRST content
+ * line and reclaims 2 trailing padding columns so the total width is
+ * unchanged (pi asserts rendered line widths). When the first line is fully
+ * packed (no trailing padding to reclaim), the prompt is skipped for that
+ * line to avoid overflowing. The block cursor (`\x1b[7m`) is untouched.
+ */
+function patchEditorPrompt(): void {
+	const proto = Editor.prototype as any;
+	if (proto[EDITOR_PROMPT_PATCH_FLAG]) return;
+	const originalRender = proto.render;
+	if (typeof originalRender !== "function") return;
+	proto.render = function patchedEditorRender(width: number) {
+		const lines = originalRender.call(this, width);
+		if (!Array.isArray(lines) || lines.length < 3 || !dshStyleInputPromptEnabled()) return lines;
+		// Index 0 is the top border (or scroll-up indicator); the last index is
+		// the bottom border (or scroll-down indicator); content lines sit between.
+		const first = lines[1];
+		if (typeof first !== "string") return lines;
+		const leadMatch = first.match(/^[ \t]*/);
+		const lead = leadMatch ? leadMatch[0] : "";
+		const rest = first.slice(lead.length);
+		const trailMatch = rest.match(/[ \t]+$/);
+		const trail = trailMatch ? trailMatch[0] : "";
+		if (trail.length < 2) return lines; // no padding room — keep width intact
+		const mid = rest.slice(0, rest.length - trail.length);
+		lines[1] = `${lead}${POINTER} ${mid}${trail.slice(0, trail.length - 2)}`;
+		return lines;
+	};
+	proto[EDITOR_PROMPT_PATCH_FLAG] = true;
 }
 
 function patchAssistantMessages(): void {
@@ -3710,6 +3807,17 @@ function autoDeriveBgFromTheme(theme: any): void {
 	D_RST = TRANSPARENT_RESET;
 	DIVIDER = `${FG_RULE}│${D_RST}`;
 	DEFAULT_DIFF_COLORS = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_DIM };
+	// dsh-TUI style diff: keep red/green foreground (FG_ADD / FG_DEL) but drop
+	// the tinted row backgrounds so diffs look like plain +/- lines with no
+	// green/red panel tint behind the text.
+	if (dshStylePlainDiffEnabled()) {
+		BG_ADD = TRANSPARENT_BG;
+		BG_DEL = TRANSPARENT_BG;
+		BG_ADD_W = TRANSPARENT_BG;
+		BG_DEL_W = TRANSPARENT_BG;
+		BG_GUTTER_ADD = TRANSPARENT_BG;
+		BG_GUTTER_DEL = TRANSPARENT_BG;
+	}
 }
 
 // Track which palette fields the user explicitly set so theme-derived
@@ -4429,7 +4537,16 @@ async function renderUnified(
 		const numFg = borderFg || FG_LNUM;
 		const gutter = `${border}${gutterBg}${lnum(num, nw, numFg)}${signFg}${sign} ${D_RST}${DIVIDER} `;
 		const cont = `${border}${gutterBg}${" ".repeat(nw + 2)}${D_RST}${DIVIDER} `;
-		const rows = wrapAnsi(tabs(body), cw, adaptiveWrapRows(), bodyBg);
+		// dsh-style plain diff: strip syntax/word ANSI and paint the whole
+		// content red (del) / green (add) — matches dsh-TUI's `- line`/`+ line`.
+		const bodyFg = dshStylePlainDiffEnabled() ? borderFg : "";
+		let rows: string[];
+		if (bodyFg) {
+			rows = wrapAnsi(tabs(stripAnsi(body)), cw, adaptiveWrapRows(), "");
+			rows = rows.map((row: string) => `${bodyFg}${row}${D_RST}`);
+		} else {
+			rows = wrapAnsi(tabs(body), cw, adaptiveWrapRows(), bodyBg);
+		}
 		out.push(`${gutter}${rows[0]}${D_RST}`);
 		for (let r = 1; r < rows.length; r++) out.push(`${cont}${rows[r]}${D_RST}`);
 	}
@@ -4574,7 +4691,13 @@ async function renderSplit(
 		else body = `${BG_BASE}${D_DIM}${hl}`;
 		const gutter = `${border}${gBg}${lnum(num, nw, numFg)}${sFg}${D_BOLD}${sign} ${D_RST}${FG_RULE}│${D_RST} `;
 		const contGutter = `${border}${gBg}${" ".repeat(nw + 2)}${D_RST}${FG_RULE}│${D_RST} `;
-		return { gutter, contGutter, bodyRows: wrapAnsi(tabs(body), cw, adaptiveWrapRows(), cBg) };
+		// dsh-style plain diff: strip syntax/word ANSI, paint whole line
+		// red (del) / green (add) — matches dsh-TUI's `- line` / `+ line`.
+		const bodyFg = dshStylePlainDiffEnabled() ? borderFg : "";
+		const bodyRows: string[] = bodyFg
+			? wrapAnsi(tabs(stripAnsi(body)), cw, adaptiveWrapRows(), "").map((row: string) => `${bodyFg}${row}${D_RST}`)
+			: wrapAnsi(tabs(body), cw, adaptiveWrapRows(), cBg);
+		return { gutter, contGutter, bodyRows };
 	}
 
 	const out: string[] = [];
@@ -6026,6 +6149,7 @@ export default function (pi: ExtensionAPI) {
 	patchCustomMessageRender();
 	patchUserMessageRender();
 	patchAssistantMessages();
+	patchEditorPrompt();
 	patchToolExecutionRenderers();
 	applyDiffPalette();
 	registerThinkingLabels(pi);
