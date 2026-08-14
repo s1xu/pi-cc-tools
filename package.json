@@ -30,6 +30,7 @@
   "files": [
     "extensions/index.ts",
     "extensions/spinner.ts",
+    "themes/claude-code-dark.json",
     "config/config.example.json",
     "README.md",
     "CHANGELOG.md"

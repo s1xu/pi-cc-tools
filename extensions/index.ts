@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readFile as readFileAsync } from "node:fs/promises";
 import { basename, dirname, extname, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
 	BashToolDetails,
@@ -158,6 +159,12 @@ interface SettingsFile {
 	 * background tints).
 	 */
 	dshStylePlainDiff?: boolean;
+	/**
+	 * When true (default), the fork auto-selects the bundled claude-code-dark
+	 * theme on first load if the current pi theme is a built-in default.
+	 * Set to false to keep your existing theme.
+	 */
+	autoClaudeDarkTheme?: boolean;
 }
 
 let _settingsCache: { value: SettingsFile; timestamp: number } | null = null;
@@ -6173,6 +6180,33 @@ function renderOpenAiToolResult(name: string, result: any, expanded: boolean, is
 }
 
 // ===========================================================================
+// Bundled claude-code-dark theme
+// ===========================================================================
+
+/** Absolute path to the claude-code-dark theme shipped with this package. */
+function bundledThemePath(): string | undefined {
+	// In jiti (ESM) context, locate via the module URL.  The TS error for
+	// import.meta under a CJS target is harmless at runtime — jiti resolves
+	// the URL correctly regardless.
+	try {
+		// @ts-ignore — import.meta.url works in jiti even with CJS target
+		const metaUrl: string | undefined = import.meta?.url;
+		if (metaUrl) {
+			const dir = dirname(fileURLToPath(metaUrl));
+			const candidate = resolve(dir, "..", "themes", "claude-code-dark.json");
+			if (existsSync(candidate)) return candidate;
+		}
+	} catch { /* fall through to cwd-relative probe */ }
+	// Fallback: repo layout (extensions/ + themes/ under the same root).
+	const cwd = process.cwd();
+	for (const base of [resolve(cwd), resolve(cwd, "..")]) {
+		const candidate = resolve(base, "themes", "claude-code-dark.json");
+		if (existsSync(candidate)) return candidate;
+	}
+	return undefined;
+}
+
+// ===========================================================================
 // Extension
 // ===========================================================================
 
@@ -7195,5 +7229,29 @@ export default function (pi: ExtensionAPI) {
 		clearHighlightCache();
 		invalidateThemePaletteCache();
 		bumpToolBranchVisualEpoch();
+	});
+
+	// Ship the bundled claude-code-dark theme so the fork's look is available
+	// to every install, even without a local ~/.pi/themes copy.
+	pi.on("resources_discover", async () => {
+		const themePath = bundledThemePath();
+		return themePath ? { themePaths: [themePath] } : undefined;
+	});
+
+	// Default the active pi theme to the bundled claude-code-dark unless the
+	// user has explicitly chosen another (non built-in) theme. Set
+	// `autoClaudeDarkTheme: false` in settings.json to opt out.
+	pi.on("session_start", async (_event, ctx) => {
+		if (!ctx.hasUI) return;
+		if (readSettings().autoClaudeDarkTheme === false) return;
+		try {
+			const currentName = (ctx.ui.theme as any)?.name;
+			// Only take over when the user is on a built-in default theme.
+			if (currentName && currentName !== "dark" && currentName !== "light") return;
+			const themes = ctx.ui.getAllThemes();
+			if (themes.some((t) => t.name === "claude-code-dark")) {
+				ctx.ui.setTheme("claude-code-dark");
+			}
+		} catch { /* best effort — never break startup on theme issues */ }
 	});
 }
