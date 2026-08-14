@@ -2141,7 +2141,7 @@ function cleanUserMessageLine(line: string): string {
 	return `${TRANSPARENT_BG}${trimAnsiRight(stripBackgroundAnsi(stripOsc133Zones(line)))}${TRANSPARENT_BG}`;
 }
 
-/** Grey `userMessageBg` panel ANSI for dsh-style user bubbles. */
+/** `userMessageBg` panel ANSI for dsh-style user bubbles. */
 function dshUserMessageBgAnsi(): string {
 	try {
 		const theme = getGlobalPiTheme();
@@ -2149,10 +2149,11 @@ function dshUserMessageBgAnsi(): string {
 			const ansi = (theme as any).getBgAnsi("userMessageBg");
 			if (typeof ansi === "string" && ansi && ansi !== TRANSPARENT_BG) return ansi;
 		}
-	} catch { /* fall through to the fallback */ }
-	// Fallback grey panel (reads as a subtle box on dark terminals) when the
-	// theme is unavailable or its userMessageBg is the transparent override.
-	return "\x1b[48;2;42;45;52m";
+	} catch { /* fall through to transparent */ }
+	// No hardcoded background: when the active theme does not define
+	// `userMessageBg` (e.g. pi's built-in dark/light themes use `userMsgBg`)
+	// the bubble renders transparent instead of a jarring dark box.
+	return TRANSPARENT_BG;
 }
 
 function borderedUserMessageLine(line: string, width: number): string {
