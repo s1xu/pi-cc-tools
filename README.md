@@ -24,8 +24,9 @@ Claude Code inspired tool rendering for Pi — Shiki-powered diffs, status dots,
 
 - **Compact built-in tool rendering** for `read`, `bash`, `grep`, `find`, `ls`, `edit`, and `write`
 - **Claude-style OpenAI tool rendering** for `apply_patch` plus common Pi/OpenAI-style tools like `webfetch`, `web_search`, `fetch_content`, task tools, and context tools
-- **`apply_patch` diff previews** that render parsed file patches in the call phase, similar to `edit`/`write`
-- **Adaptive edit/write diffs** with split or unified layouts, syntax highlighting, and inline word-level emphasis
+- **`apply_patch` diff previews** that render parsed file patches in the call phase, similar to `write`
+- **Compact dsh-style edit diffs** with `⎿` gutters and themed `-`/`+` lines; the final tool row retains one copy of the requested replacement
+- **Adaptive write diffs** with split or unified layouts, syntax highlighting, and inline word-level emphasis
 - **Diff stat bar** with colored add/remove summary and hunk metadata
 - **Progressive collapsed diff hints** that shorten on narrow terminals
 - **Thinking labels** during streaming and final messages, with context sanitization
@@ -36,8 +37,8 @@ Claude Code inspired tool rendering for Pi — Shiki-powered diffs, status dots,
 - **RTK rewrite integration** that folds rewrite notices into the bash tool row with a muted `(RTK)` badge and expanded-only rewrite details
 - **Transparent tool backgrounds** in `transparent` or `outlines` mode
 - **Theme-adaptive palette** — borders, branch connectors, dim text, spinner accent, and diff backgrounds automatically follow the active pi theme (set `themeAdaptive: false` to keep the fixed Claude-style palette)
-- **Light Ghostty-sync themes** — edit/write diffs use `github-light` highlighting and light-tinted diff rows; tool pending dots use softer chrome colors
-- **Transparent edit/write diffs** with universal red/green diff colors
+- **Light Ghostty-sync themes** — write diffs use `github-light` highlighting and light-tinted diff rows; tool pending dots use softer chrome colors
+- **Transparent diff rows** with universal red/green diff colors
 - **Grouped consecutive tool calls** with a compact status header and per-tool glance rows (set `groupToolCalls: false` to disable)
 - **Extra detail toggle** with `Ctrl+Shift+O`, increasing expanded preview caps without making the default view heavy
 - **Global border patch** for all tool rows, including unknown/custom tools
@@ -124,7 +125,13 @@ When `themeAdaptive` is `true` (default), the following colors are derived from 
 | Spinner verb text (`Working…`) | `borderAccent` (fallback: `accent`) |
 | Spinner status text | `muted` |
 
-User-supplied `diffTheme` presets and `diffColors` overrides always win over theme-derived defaults. File-type icons (e.g. `ts`, `py`, `rs`) keep their language-identity colors and are not theme-derived.
+User-supplied `diffTheme` presets and `diffColors` overrides always win over theme-derived defaults for syntax-highlighted write and `apply_patch` diffs. Compact `edit` diffs use the active theme's `toolDiffAdded` and `toolDiffRemoved` tokens directly. File-type icons (e.g. `ts`, `py`, `rs`) keep their language-identity colors and are not theme-derived.
+
+### Compact `edit` diffs
+
+`edit` renders exact replacement blocks as a compact dsh-style body. The first changed line uses a `⎿` gutter and later lines align beneath it. Removed lines use `toolDiffRemoved`; added lines use `toolDiffAdded`.
+
+The preview is visible while the tool runs. After a successful edit, Pi renders the same body in the result slot, so the completed row contains one Diff rather than duplicated call/result output. `edit` intentionally does not add surrounding context lines, line numbers, side-by-side columns, or Shiki syntax highlighting. By default it shows up to 32 rows; `Ctrl+O` uses the existing expanded output limit.
 
 Set `themeAdaptive: false` to keep the original fixed Claude-style palette regardless of the active pi theme.
 
@@ -194,7 +201,7 @@ Use `/cc-tools` to control tool UI at runtime:
 | `bashCollapsedLines` | `24` | Lines for collapsed bash output (fork default) |
 | `liveToolPreview` | `true` | Show a small live output preview while tools are still running |
 | `liveToolPreviewLines` | `5` | Lines shown in the collapsed live preview |
-| `diffCollapsedLines` | `24` | Diff lines before collapsing |
+| `diffCollapsedLines` | `24` | Diff lines before collapsing for write and `apply_patch` previews |
 | `diffTheme` | `claude-code-dark` | Diff preset (`default`, `midnight`, `neon`, `claude-code-dark`, …). Also accepts Shiki theme names like `github-dark` |
 | `dshStyleThinking` | `true` | (Requires pi `hideThinkingBlock: false`) dsh-TUI-style thinking: expanded while streaming, collapses to `∴ Thinking · Ns (ctrl+o to expand)` after completion. Ctrl+O also expands/collapses thinking summaries (pi's tool-expansion loop now includes assistant messages). |
 | `dshStyleUserMessage` | `true` | dsh-TUI-style user messages: `❯ text` on the theme's grey `userMessageBg` background with no rounded border box. |

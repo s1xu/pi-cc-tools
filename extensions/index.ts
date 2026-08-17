@@ -4844,199 +4844,50 @@ function summarizeEditOperations(operations: Array<{ oldText: string; newText: s
 	return { diffs, totalAdded, totalRemoved, totalLines, totalHunks, summary: summarizeDiff(totalAdded, totalRemoved) };
 }
 
-type EditOperationSummary = ReturnType<typeof summarizeEditOperations>;
-
-function getCachedEditOperationSummary(ctx: any, key: string, operations: Array<{ oldText: string; newText: string }>): EditOperationSummary {
-	if (ctx.state?._editSummaryKey === key && ctx.state._editSummary) {
-		return ctx.state._editSummary as EditOperationSummary;
-	}
-	const summary = summarizeEditOperations(operations);
-	if (ctx.state) {
-		ctx.state._editSummaryKey = key;
-		ctx.state._editSummary = summary;
-	}
-	return summary;
-}
-
 function normalizeToLf(text: string): string {
 	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-function stripBomText(text: string): string {
-	return text.startsWith("\uFEFF") ? text.slice(1) : text;
+function dshEditTextLines(text: string): string[] {
+	const lines = normalizeToLf(text).split("\n");
+	if (lines[lines.length - 1] === "") lines.pop();
+	return lines;
 }
 
-function normalizeTextForFuzzyMatch(text: string): string {
-	return text
-		.normalize("NFKC")
-		.split("\n")
-		.map((line) => line.trimEnd())
-		.join("\n")
-		.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
-		.replace(/[\u201C\u201D\u201E\u201F]/g, '"')
-		.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
-		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
-}
-
-function findEditMatch(content: string, oldText: string): { found: boolean; index: number; matchLength: number; usedFuzzyMatch: boolean } {
-	const exactIndex = content.indexOf(oldText);
-	if (exactIndex !== -1) return { found: true, index: exactIndex, matchLength: oldText.length, usedFuzzyMatch: false };
-	const fuzzyContent = normalizeTextForFuzzyMatch(content);
-	const fuzzyOldText = normalizeTextForFuzzyMatch(oldText);
-	const fuzzyIndex = fuzzyContent.indexOf(fuzzyOldText);
-	return fuzzyIndex === -1
-		? { found: false, index: -1, matchLength: 0, usedFuzzyMatch: false }
-		: { found: true, index: fuzzyIndex, matchLength: fuzzyOldText.length, usedFuzzyMatch: true };
-}
-
-function countFuzzyOccurrences(content: string, oldText: string): number {
-	const fuzzyContent = normalizeTextForFuzzyMatch(content);
-	const fuzzyOldText = normalizeTextForFuzzyMatch(oldText);
-	return fuzzyContent.split(fuzzyOldText).length - 1;
-}
-
-function lineNumberAtIndex(text: string, index: number): number {
-	return text.slice(0, Math.max(0, index)).split("\n").length;
-}
-
-function countLineBreaks(text: string): number {
-	return (text.match(/\n/g) ?? []).length;
-}
-
-function offsetParsedDiff(diff: ParsedDiff, oldOffset: number, newOffset = oldOffset): ParsedDiff {
-	return {
-		...diff,
-		lines: diff.lines.map((line) =>
-			line.type === "sep"
-				? line
-				: {
-					...line,
-					oldNum: line.oldNum === null ? null : line.oldNum + oldOffset,
-					newNum: line.newNum === null ? null : line.newNum + newOffset,
-				},
-		),
-	};
-}
-
-function getFirstChangedNewLine(diff: ParsedDiff): number {
-	let currentNewLine = 0;
-	for (let i = 0; i < diff.lines.length; i++) {
-		const line = diff.lines[i];
-		if (line.type === "sep") {
-			currentNewLine = 0;
-			continue;
-		}
-		if (line.type === "ctx") {
-			currentNewLine = (line.newNum ?? currentNewLine) + 1;
-			continue;
-		}
-		if (line.type === "add") return line.newNum ?? currentNewLine;
-		if (currentNewLine > 0) return currentNewLine;
-		const next = diff.lines.slice(i + 1).find((entry) => entry.type !== "sep" && entry.newNum !== null);
-		if (next && next.newNum !== null) return next.newNum;
-		return line.oldNum ?? 0;
-	}
-	return 0;
-}
-
-interface LocalizedEditDiff {
-	diff: ParsedDiff;
-	line: number;
-}
-
-async function computeLocalizedEditDiffs(filePath: string, operations: Array<{ oldText: string; newText: string }>, cwd: string): Promise<LocalizedEditDiff[] | null> {
-	if (!filePath || operations.length === 0) return null;
-	try {
-		const rawContent = await readFileAsync(resolve(cwd, filePath), "utf8");
-		const normalizedContent = normalizeToLf(stripBomText(rawContent));
-		const normalizedOps = operations.map((edit) => ({ oldText: normalizeToLf(edit.oldText), newText: normalizeToLf(edit.newText) }));
-		const baseContent = normalizedOps.some((edit) => findEditMatch(normalizedContent, edit.oldText).usedFuzzyMatch)
-			? normalizeTextForFuzzyMatch(normalizedContent)
-			: normalizedContent;
-		const matches = normalizedOps.map((edit, editIndex) => {
-			const match = findEditMatch(baseContent, edit.oldText);
-			if (!match.found || countFuzzyOccurrences(baseContent, edit.oldText) !== 1) return null;
-			return { editIndex, matchIndex: match.index, matchLength: match.matchLength, newText: edit.newText };
-		});
-		if (matches.some((match) => match === null)) return null;
-		const ordered = [...(matches as Array<{ editIndex: number; matchIndex: number; matchLength: number; newText: string }>)].sort((a, b) => a.matchIndex - b.matchIndex);
-		for (let i = 1; i < ordered.length; i++) {
-			const prev = ordered[i - 1];
-			const current = ordered[i];
-			if (prev.matchIndex + prev.matchLength > current.matchIndex) return null;
-		}
-		const localized: Array<LocalizedEditDiff | null> = Array(operations.length).fill(null);
-		let lineDelta = 0;
-		for (const match of ordered) {
-			const oldChunk = baseContent.slice(match.matchIndex, match.matchIndex + match.matchLength);
-			const oldStartLine = lineNumberAtIndex(baseContent, match.matchIndex);
-			const newStartLine = oldStartLine + lineDelta;
-			const diff = offsetParsedDiff(parseDiff(oldChunk, match.newText), oldStartLine - 1, newStartLine - 1);
-			localized[match.editIndex] = { diff, line: getFirstChangedNewLine(diff) };
-			lineDelta += countLineBreaks(match.newText) - countLineBreaks(oldChunk);
-		}
-		return localized.every(Boolean) ? (localized as LocalizedEditDiff[]) : null;
-	} catch {
-		return null;
-	}
-}
-
-function renderEditPreviewBody(
-	ctx: any,
-	key: string,
-	theme: Theme,
-	language: BundledLanguage | undefined,
+function renderDshEditDiff(
 	operations: Array<{ oldText: string; newText: string }>,
-	diffs: ParsedDiff[],
-	lines: number[],
-	summary: string,
-): void {
-	const dc = resolveDiffColors(theme);
-	const branchWidth = branchDiffWidth();
-	if (operations.length === 1) {
-		const [diff] = diffs;
-		const line = lines[0] ?? getFirstChangedNewLine(diff);
-		renderSplit(diff, language, ctx.expanded ? MAX_PREVIEW_LINES : 32, dc, branchWidth)
-			.then((rendered) => {
-				if (ctx.state._pk !== key) return;
-				ctx.state._ptBody = `${summarizeDiff(diff.added, diff.removed)}${formatLineMeta(line, theme)}\n${rendered}`;
-				ctx.state._ptDisplay = indentBranchBlock(withBranch(ctx.state._ptBody, theme, false, true));
-				safeInvalidate(ctx);
-			})
-			.catch(() => {
-				if (ctx.state._pk !== key) return;
-				ctx.state._ptBody = `${summarizeDiff(diff.added, diff.removed)}${formatLineMeta(line, theme)}`;
-				ctx.state._ptDisplay = indentBranchBlock(withBranch(ctx.state._ptBody, theme, false, true));
-				safeInvalidate(ctx);
-			});
-		return;
+	theme: Theme,
+	expanded: boolean,
+): string {
+	const rows: Array<{ color: "toolDiffAdded" | "toolDiffRemoved" | "muted"; text: string }> = [];
+	for (let index = 0; index < operations.length; index++) {
+		if (index > 0) rows.push({ color: "muted", text: "⋯" });
+		for (const line of dshEditTextLines(operations[index].oldText)) {
+			rows.push({ color: "toolDiffRemoved", text: `- ${line}` });
+		}
+		for (const line of dshEditTextLines(operations[index].newText)) {
+			rows.push({ color: "toolDiffAdded", text: `+ ${line}` });
+		}
 	}
-	const maxShown = ctx.expanded ? operations.length : Math.min(operations.length, 3);
-	const previewLines = ctx.expanded
-		? Math.max(6, Math.floor(MAX_RENDER_LINES / Math.max(1, maxShown)))
-		: Math.max(8, Math.floor(MAX_PREVIEW_LINES / Math.max(1, maxShown)));
-	mapWithConcurrency(diffs.slice(0, maxShown), DIFF_RENDER_CONCURRENCY, async (diff, index) => {
-		const line = lines[index] ?? getFirstChangedNewLine(diff);
-		return renderSplit(diff, language, previewLines, dc, branchWidth)
-			.then((rendered) => `Edit ${index + 1}/${operations.length}${formatLineMeta(line, theme)}\n${rendered}`)
-			.catch(() => `Edit ${index + 1}/${operations.length}${formatLineMeta(line, theme)} ${summarizeDiff(diff.added, diff.removed)}`);
-	})
-		.then((sections) => {
-			if (ctx.state._pk !== key) return;
-			const remainder = operations.length - maxShown;
-			const suffix = remainder > 0
-				? `\n${theme.fg("muted", `… ${remainder} more edit blocks${toolOutputDetailHint(theme, ctx.expanded, true)}`)}`
-				: "";
-			ctx.state._ptBody = `${operations.length} edits ${summary}\n\n${sections.join("\n\n")}${suffix}`;
-			ctx.state._ptDisplay = indentBranchBlock(withBranch(ctx.state._ptBody, theme, false, true));
-			safeInvalidate(ctx);
-		})
-		.catch(() => {
-			if (ctx.state._pk !== key) return;
-			ctx.state._ptBody = `${operations.length} edits ${summary}`;
-			ctx.state._ptDisplay = indentBranchBlock(withBranch(ctx.state._ptBody, theme, false, true));
-			safeInvalidate(ctx);
+
+	const maxLines = expanded ? MAX_RENDER_LINES : 32;
+	const visibleRows = rows.slice(0, maxLines);
+	const hiddenRows = rows.length - visibleRows.length;
+	if (hiddenRows > 0) {
+		visibleRows.push({
+			color: "muted",
+			text: `… ${hiddenRows} more diff lines${toolOutputDetailHint(theme, expanded, true)}`,
 		});
+	}
+
+	return visibleRows
+		.map((row, index) => `${theme.fg("dim", index === 0 ? "  ⎿  " : "     ")}${theme.fg(row.color, row.text)}`)
+		.join("\n");
+}
+
+function renderEditPreviewBody(ctx: any, theme: Theme, operations: Array<{ oldText: string; newText: string }>): void {
+	ctx.state._ptBody = renderDshEditDiff(operations, theme, ctx.expanded);
+	ctx.state._ptDisplay = ctx.state._ptBody;
 }
 
 function stripThinkingPresentationArtifacts(text: string): string {
@@ -7067,17 +6918,14 @@ export default function (pi: ExtensionAPI) {
 		description: editTool.description,
 		parameters: editTool.parameters,
 		async execute(toolCallId, params, signal, onUpdate, _ctx) {
-			const fp = params.path ?? (params as any).file_path ?? "";
 			const operations = getEditOperations(params);
-			const localizedDiffs = operations.length === 1 ? await computeLocalizedEditDiffs(fp, operations, cwd) : null;
 			const result = await editTool.execute(toolCallId, params, signal, onUpdate);
 			if (operations.length === 0) return result;
 			const { diffs, summary, totalLines, totalHunks } = summarizeEditOperations(operations);
 			const baseDetails = (((result as any).details ?? {}) as Record<string, unknown>);
 			if (operations.length === 1) {
-				const localized = localizedDiffs?.[0];
-				const editLine = localized?.line ?? (typeof baseDetails.firstChangedLine === "number" ? baseDetails.firstChangedLine : 0);
-				const diff = localized?.diff ?? diffs[0];
+				const diff = diffs[0];
+				const editLine = typeof baseDetails.firstChangedLine === "number" ? baseDetails.firstChangedLine : 0;
 				(result as any).details = {
 					...baseDetails,
 					_type: "editInfo",
@@ -7108,28 +6956,14 @@ export default function (pi: ExtensionAPI) {
 			const summary = stableCallSummary(ctx, "_callSummary", () => shouldRevealCallArgs(ctx) && operations.length > 1 ? `${sp(fp)} ${theme.fg("muted", `(${operations.length} edits)`)}` : sp(fp), revealSummary);
 			syncToolCallStatus(ctx);
 			const hdr = toolHeader("Edit", summary, theme, ` ${toolStatusDot(ctx, theme)}`, liveLineCountTrailing(ctx, theme));
+			if (!ctx.isPartial && ctx.executionStarted) return makeText(ctx.lastComponent, hdr);
 			if (!(ctx.argsComplete && operations.length > 0)) return makeText(ctx.lastComponent, hdr);
-			const diffWidth = branchDiffWidth();
-			const key = `edit:${fp}:${hashText(operations.map((edit) => `${edit.oldText}\u0000${edit.newText}`).join("\u0001"))}:${diffWidth}:${ctx.expanded ? 1 : 0}`;
-			const { diffs: fallbackDiffs, summary: editSummary } = getCachedEditOperationSummary(ctx, key, operations);
+			const key = `edit:${fp}:${hashText(operations.map((edit) => `${edit.oldText}\u0000${edit.newText}`).join("\u0001"))}:${ctx.expanded ? 1 : 0}`;
 			if (ctx.state._pk !== key) {
 				ctx.state._pk = key;
-				ctx.state._ptBody = theme.fg("muted", "(rendering…)");
-				ctx.state._ptDisplay = indentBranchBlock(withBranch(ctx.state._ptBody, theme, false, true));
-				const lg = lang(fp);
-				void computeLocalizedEditDiffs(fp, operations, cwd)
-					.then((localizedDiffs) => {
-						if (ctx.state._pk !== key) return;
-						const diffs = localizedDiffs?.map((entry) => entry.diff) ?? fallbackDiffs;
-						const lines = localizedDiffs?.map((entry) => entry.line) ?? diffs.map((diff) => getFirstChangedNewLine(diff));
-						renderEditPreviewBody(ctx, key, theme, lg, operations, diffs, lines, editSummary);
-					})
-					.catch(() => {
-						if (ctx.state._pk !== key) return;
-						renderEditPreviewBody(ctx, key, theme, lg, operations, fallbackDiffs, fallbackDiffs.map((diff) => getFirstChangedNewLine(diff)), editSummary);
-					});
+				renderEditPreviewBody(ctx, theme, operations);
 			}
-				const body = liveBranchDisplay(ctx.state, theme) ?? (ctx.state._ptDisplay as string | undefined);
+			const body = liveBranchDisplay(ctx.state, theme) ?? (ctx.state._ptDisplay as string | undefined);
 			return makeText(ctx.lastComponent, body ? `${hdr}\n${body}` : hdr);
 		},
 		renderResult(result, { expanded, isPartial }, theme, ctx) {
@@ -7146,16 +6980,9 @@ export default function (pi: ExtensionAPI) {
 						.join("\n") ?? "Error";
 				return makeText(ctx.lastComponent, indentBranchBlock(withBranch(theme.fg("error", e), theme)));
 			}
-			if ((result as any).details?._type === "editInfo") {
-				const { editLine, hunks, added, removed } = (result as any).details;
-				const loc = formatLineMeta(editLine ?? 0, theme);
-				const summary = diffSummaryWithMeta(added ?? 0, removed ?? 0, hunks ?? 0, "");
-				return makeText(ctx.lastComponent, indentBranchBlock(withBranch(`${summary}${loc}`, theme)));
-			}
-			if ((result as any).details?._type === "multiEditInfo") {
-				const { editCount, diffLineCount, hunks, totalAdded, totalRemoved } = (result as any).details;
-				const summary = diffSummaryWithMeta(totalAdded ?? 0, totalRemoved ?? 0, hunks ?? 0, "");
-				return makeText(ctx.lastComponent, indentBranchBlock(withBranch(`${editCount} edits ${summary}${typeof diffLineCount === "number" ? ` ${theme.fg("muted", `(${diffLineCount} diff lines)`)}` : ""}`, theme)));
+			const operations = getEditOperations(ctx.args);
+			if (operations.length > 0) {
+				return makeText(ctx.lastComponent, renderDshEditDiff(operations, theme, expanded));
 			}
 			return makeText(ctx.lastComponent, indentBranchBlock(withBranch(theme.fg("success", "Applied"), theme)));
 		},
