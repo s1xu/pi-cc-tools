@@ -1619,15 +1619,59 @@ function stripTransientMagicContextTags(text: string): string {
 	return text.replace(MAGIC_CONTEXT_TAG_LINE_PREFIX, "$1");
 }
 
-function replaceInlineMath(text: string): string {
-	if (!hasInlineMathMarkers(text)) return text;
-	const withParens = text.replace(/\\\(([\s\S]*?)\\\)/g, (_match, body: string) => {
+function mapOutsideInlineCode(text: string, transform: (chunk: string) => string): string {
+	return text.split(/(`[^`\n]+`)/g).map((span) => (
+		span.startsWith("`") && span.endsWith("`") && span.length >= 2 ? span : transform(span)
+	)).join("");
+}
+
+// Leave fenced and inline code unchanged so shell $1 $2 is not treated as math
+function mapOutsideCode(text: string, transform: (chunk: string) => string): string {
+	let result = "";
+	let cursor = 0;
+	const openRe = /(^|\r?\n)[ \t]{0,3}(```+|~~~+)/g;
+	while (cursor < text.length) {
+		openRe.lastIndex = cursor;
+		const open = openRe.exec(text);
+		if (!open) {
+			result += mapOutsideInlineCode(text.slice(cursor), transform);
+			break;
+		}
+		const fenceStart = open.index + open[1].length;
+		if (fenceStart < cursor) {
+			result += mapOutsideInlineCode(text.slice(cursor), transform);
+			break;
+		}
+		result += mapOutsideInlineCode(text.slice(cursor, fenceStart), transform);
+		const marker = open[2];
+		const afterOpen = open.index + open[0].length;
+		const closeRe = new RegExp(`\\r?\\n[ \\t]{0,3}${escapeRegex(marker[0])}{${marker.length},}[^\\n]*`);
+		const close = closeRe.exec(text.slice(afterOpen));
+		if (!close) {
+			result += text.slice(fenceStart);
+			break;
+		}
+		const fenceEnd = afterOpen + close.index + close[0].length;
+		result += text.slice(fenceStart, fenceEnd);
+		cursor = fenceEnd;
+	}
+	return result;
+}
+
+function replaceInlineMathInChunk(chunk: string): string {
+	const withParens = chunk.replace(/\\\(([\s\S]*?)\\\)/g, (_match, body: string) => {
 		return codeSpan(formatMathForDisplay(body, false));
 	});
-	return withParens.replace(/(^|[^\\])\$([^\n$]{1,200})\$/g, (match, prefix: string, body: string) => {
+	return withParens.replace(/(^|[^\\])\$([^\n$]{1,200})\$/g, (match, prefix: string, body: string, offset: number, source: string) => {
 		if (!looksLikeInlineMath(body)) return match;
+		if (/^\d/.test(source.slice(offset + match.length))) return match;
 		return `${prefix}${codeSpan(formatMathForDisplay(body, false))}`;
 	});
+}
+
+function replaceInlineMath(text: string): string {
+	if (!hasInlineMathMarkers(text)) return text;
+	return mapOutsideCode(text, replaceInlineMathInChunk);
 }
 
 interface MathBlock {
