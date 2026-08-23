@@ -760,7 +760,7 @@ function getToolArgSummary(tool: any): string {
 		if (parts.length > 0) value += ` (${parts.join(", ")})`;
 		return value;
 	}
-	if (name === "bash") return summarizeText(args.command ?? "", 72);
+	if (name === "bash") return oneLineCommand(args.command);
 	if (name === "grep") return `"${summarizeText(args.pattern ?? "", 40)}"${args.path ? ` in ${args.path}` : ""}`;
 	if (name === "find") return `"${summarizeText(args.pattern ?? "", 40)}"${args.path ? ` in ${args.path}` : ""}`;
 	if (name === "ls") return shortPath(process.cwd(), args.path ?? ".");
@@ -778,9 +778,10 @@ function getToolCallLine(tool: any): string {
 	return `${label}${summary ? ` ${summary}` : ""}`;
 }
 
-function getCompactToolLine(tool: any, width: number, groupedLabel?: string): string {
+function getCompactToolLines(tool: any, width: number, groupedLabel?: string): string[] {
 	const content = removeGroupedToolPrefix(getToolCallLine(tool), groupedLabel);
-	return clampLineWidth(content || getToolName(tool), width);
+	const text = content || getToolName(tool);
+	return wrapTextWithAnsi(text, Math.max(1, width));
 }
 
 function getExpandedToolGroupLines(tool: any, width: number, groupedLabel?: string): string[] {
@@ -968,7 +969,7 @@ class ToolGroupComponent extends Container {
 			const tool = this.tools[index];
 			const rawLines = this.expanded
 				? getExpandedToolGroupLines(tool, childWidth, groupedName ? label : undefined)
-				: [getCompactToolLine(tool, childWidth, groupedName ? label : undefined)];
+				: getCompactToolLines(tool, childWidth, groupedName ? label : undefined);
 			const branched = formatBranchedToolLines(
 				rawLines,
 				index,
@@ -1187,6 +1188,10 @@ function summarizeText(text: string, max = 60): string {
 	const oneLine = text.replace(/\n/g, " ").trim();
 	if (oneLine.length <= max) return oneLine;
 	return `${oneLine.slice(0, Math.max(0, max - 3))}...`;
+}
+
+function oneLineCommand(command: unknown): string {
+	return String(command ?? "").replace(/\s+/g, " ").trim();
 }
 
 function hashText(text: string): string {
@@ -6639,7 +6644,7 @@ export default function (pi: ExtensionAPI) {
 		renderCall(args, theme, ctx) {
 			syncToolCallStatus(ctx);
 			const rewrite = ensureRtkRewriteForContext(ctx, args);
-			const summary = stableCallSummary(ctx, "_callSummary", () => summarizeText(args.command, 72));
+			const summary = stableCallSummary(ctx, "_callSummary", () => oneLineCommand(args.command));
 			const rtkBadge = rewrite ? theme.fg("muted", " (RTK)") : "";
 			return makeText(
 				ctx.lastComponent,
@@ -6663,9 +6668,7 @@ export default function (pi: ExtensionAPI) {
 					: running;
 				return makeText(ctx.lastComponent, withRewrite);
 			}
-			// Collapsed: only keep the live-preview tail (or nothing). Expanded: full list.
-			const keepTail = !expanded && liveToolPreviewEnabled() ? liveToolPreviewLimit() : undefined;
-			const nonEmpty = collectNonEmptyLines(output, expanded ? undefined : (keepTail ?? 0));
+			const nonEmpty = collectNonEmptyLines(output);
 			clearBlinkTimer(ctx);
 			setToolStatus(ctx, ctx.isError ? "error" : "success");
 			if (nonEmpty.total > 0 && ctx.state?._bashPreviewReleased !== true) {
@@ -6677,25 +6680,18 @@ export default function (pi: ExtensionAPI) {
 			let text = exitCode === null || exitCode === 0 ? theme.fg("success", "Done") : theme.fg("error", `Exit ${exitCode}`);
 			text += theme.fg("muted", ` (${nonEmpty.total} lines)`);
 			if (details?.truncation?.truncated) text += theme.fg("warning", " [truncated]");
-			const persistentPreview = shouldPreserveBashPreview(ctx) ? buildPersistentBashPreview(nonEmpty.lines, theme) : "";
-			// Collapsed bash always shows a preview tail of the output (not just
-			// the preserved live preview), so results are visible like dsh-TUI.
-			if (!expanded && nonEmpty.total > 0) {
-				const collapsed = bashCollapsedLimit();
-				const preview = persistentPreview || buildPreviewText(
+			if (!expanded) text += toolOutputDetailHint(theme, expanded);
+			if (rewrite && expanded) text += `\n${formatRtkRewriteDetails(rewrite, theme)}`;
+			if (nonEmpty.total > 0) {
+				text += `\n${buildPreviewText(
 					nonEmpty.lines,
-					false,
+					true,
 					theme,
-					collapsed,
+					expandedPreviewLimit(),
 					nonEmpty.total,
 					(line) => theme.fg("dim", line),
-				);
-				return makeText(ctx.lastComponent, withBranch(`${text}${toolOutputDetailHint(theme, expanded)}\n${preview}`, theme));
+				)}`;
 			}
-			if (!expanded) return makeText(ctx.lastComponent, withBranch(text, theme));
-			const collapsed = bashCollapsedLimit();
-			if (rewrite) text += `\n${formatRtkRewriteDetails(rewrite, theme)}`;
-			text += `\n${buildPreviewText(nonEmpty.lines, false, theme, collapsed, nonEmpty.total, (line) => theme.fg("dim", line))}`;
 			return makeText(ctx.lastComponent, withBranch(text, theme));
 		},
 	});
