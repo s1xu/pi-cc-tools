@@ -1261,6 +1261,8 @@ function safeInvalidate(ctx: any): void {
 }
 
 const ASSISTANT_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-assistant-message");
+const ASSISTANT_ORIGINAL_UPDATE = Symbol.for("pi-claude-style-tools:original-assistant-updateContent");
+const ASSISTANT_ORIGINAL_SET_EXPANDED = Symbol.for("pi-claude-style-tools:original-assistant-setExpanded");
 const ASSISTANT_RENDER_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-assistant-message-render");
 const TOOL_EXECUTION_PATCH_FLAG = Symbol.for("pi-claude-style-tools:patched-tool-execution");
 
@@ -2349,7 +2351,6 @@ function patchEditorPrompt(): void {
 
 function patchAssistantMessages(): void {
 	const proto = AssistantMessageComponent.prototype as any;
-	if (proto[ASSISTANT_PATCH_FLAG]) return;
 	const originalRender = proto.render;
 	if (typeof originalRender === "function" && !proto[ASSISTANT_RENDER_PATCH_FLAG]) {
 		proto.render = function patchedAssistantMessageRender(width: number) {
@@ -2366,7 +2367,10 @@ function patchAssistantMessages(): void {
 		};
 		proto[ASSISTANT_RENDER_PATCH_FLAG] = true;
 	}
-	const originalUpdateContent = proto.updateContent;
+	if (typeof proto.updateContent === "function" && !proto[ASSISTANT_ORIGINAL_UPDATE]) {
+		proto[ASSISTANT_ORIGINAL_UPDATE] = proto.updateContent;
+	}
+	const originalUpdateContent = proto[ASSISTANT_ORIGINAL_UPDATE] ?? proto.updateContent;
 	proto.updateContent = function patchedUpdateContent(message: any, isStreaming?: boolean) {
 		// Content changed (also reached via invalidate() → updateContent): drop the
 		// cached rendered output so the next render rebuilds with the new children.
@@ -2459,7 +2463,10 @@ function patchAssistantMessages(): void {
 	// collapsed dsh-style thinking summaries — matching dsh-TUI's verbose mode
 	// where Ctrl+O shows the full thinking text again. Harmless no-op for
 	// messages without thinking blocks.
-	const originalSetExpanded = proto.setExpanded as ((expanded: boolean) => void) | undefined;
+	if (typeof proto.setExpanded === "function" && !proto[ASSISTANT_ORIGINAL_SET_EXPANDED]) {
+		proto[ASSISTANT_ORIGINAL_SET_EXPANDED] = proto.setExpanded;
+	}
+	const originalSetExpanded = proto[ASSISTANT_ORIGINAL_SET_EXPANDED] as ((expanded: boolean) => void) | undefined;
 	proto.setExpanded = function patchedAssistantSetExpanded(expanded: boolean) {
 		if (typeof originalSetExpanded === "function") {
 			try { originalSetExpanded.call(this, expanded); } catch { /* noop */ }
