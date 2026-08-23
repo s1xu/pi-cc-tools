@@ -4848,12 +4848,6 @@ function normalizeToLf(text: string): string {
 	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
-function dshEditTextLines(text: string): string[] {
-	const lines = normalizeToLf(text).split("\n");
-	if (lines[lines.length - 1] === "") lines.pop();
-	return lines;
-}
-
 function renderDshEditDiff(
 	operations: Array<{ oldText: string; newText: string }>,
 	theme: Theme,
@@ -4862,11 +4856,12 @@ function renderDshEditDiff(
 	const rows: Array<{ color: "toolDiffAdded" | "toolDiffRemoved" | "muted"; text: string }> = [];
 	for (let index = 0; index < operations.length; index++) {
 		if (index > 0) rows.push({ color: "muted", text: "⋯" });
-		for (const line of dshEditTextLines(operations[index].oldText)) {
-			rows.push({ color: "toolDiffRemoved", text: `- ${line}` });
-		}
-		for (const line of dshEditTextLines(operations[index].newText)) {
-			rows.push({ color: "toolDiffAdded", text: `+ ${line}` });
+		const diff = parseDiff(operations[index].oldText, operations[index].newText);
+		for (const line of diff.lines) {
+			if (line.type === "sep") rows.push({ color: "muted", text: "⋯" });
+			else if (line.type === "del") rows.push({ color: "toolDiffRemoved", text: `- ${line.content}` });
+			else if (line.type === "add") rows.push({ color: "toolDiffAdded", text: `+ ${line.content}` });
+			else rows.push({ color: "muted", text: `  ${line.content}` });
 		}
 	}
 

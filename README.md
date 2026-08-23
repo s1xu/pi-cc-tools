@@ -129,9 +129,9 @@ User-supplied `diffTheme` presets and `diffColors` overrides always win over the
 
 ### Compact `edit` diffs
 
-`edit` renders exact replacement blocks as a compact dsh-style body. The first changed line uses a `⎿` gutter and later lines align beneath it. Removed lines use `toolDiffRemoved`; added lines use `toolDiffAdded`.
+`edit` renders line-level hunks from each replacement block as a compact dsh-style body. The first line uses a `⎿` gutter and later lines align beneath it. Removed lines use `toolDiffRemoved`; added lines use `toolDiffAdded`; unchanged hunk context is `muted` and is not drawn as `-`/`+`.
 
-The preview is visible while the tool runs. After a successful edit, Pi renders the same body in the result slot, so the completed row contains one Diff rather than duplicated call/result output. `edit` intentionally does not add surrounding context lines, line numbers, side-by-side columns, or Shiki syntax highlighting. By default it shows up to 32 rows; `Ctrl+O` uses the existing expanded output limit.
+The preview is visible while the tool runs. After a successful edit, Pi renders the same body in the result slot, so the completed row contains one Diff rather than duplicated call/result output. `edit` does not add line numbers, side-by-side columns, or Shiki syntax highlighting. By default it shows up to 32 rows; `Ctrl+O` uses the existing expanded output limit.
 
 Set `themeAdaptive: false` to keep the original fixed Claude-style palette regardless of the active pi theme.
 
