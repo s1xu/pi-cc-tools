@@ -6683,11 +6683,15 @@ export default function (pi: ExtensionAPI) {
 			if (!expanded) text += toolOutputDetailHint(theme, expanded);
 			if (rewrite && expanded) text += `\n${formatRtkRewriteDetails(rewrite, theme)}`;
 			if (nonEmpty.total > 0) {
+				const collapsed = liveToolPreviewLimit();
+				const previewLines = expanded
+					? nonEmpty.lines
+					: (collapsed > 0 ? nonEmpty.lines.slice(-collapsed) : []);
 				text += `\n${buildPreviewText(
-					nonEmpty.lines,
-					true,
+					previewLines,
+					expanded,
 					theme,
-					expandedPreviewLimit(),
+					collapsed,
 					nonEmpty.total,
 					(line) => theme.fg("dim", line),
 				)}`;
